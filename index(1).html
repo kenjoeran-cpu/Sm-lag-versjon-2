@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="no">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Smålagsturnering</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f3f5f7;color:#17202a;font-family:Arial,sans-serif}header{background:#0b5d3b;color:white;padding:18px;text-align:center}header h1{margin:0;font-size:26px}main{max-width:900px;margin:auto;padding:14px}.card{background:white;border-radius:14px;padding:16px;margin-bottom:14px;box-shadow:0 2px 10px #0001}h2{margin:0 0 12px}.small{font-size:13px;color:#66727a}.names{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}.playerrow{display:flex;align-items:center;gap:8px;padding:7px;border:1px solid #d9dfe3;border-radius:9px}.playerrow input[type=checkbox]{width:20px;height:20px;accent-color:#0b5d3b;flex:none}.playerrow input[type=text]{min-width:0;width:100%;padding:10px;border:1px solid #ccd3d8;border-radius:9px}button{font:inherit;border:0;border-radius:10px;padding:12px 15px;font-weight:700;cursor:pointer}.primary{background:#0b5d3b;color:white;width:100%;margin-top:12px}.secondary{background:#e8edf0}.primary:disabled{opacity:.45;cursor:not-allowed}.notice{padding:11px;border-radius:9px;background:#fff7d6;margin-top:10px}.good{background:#edf8f0}.warn{background:#fff0f0}.hidden{display:none}.row{display:flex;gap:8px;align-items:center}.format{border:2px solid #dfe4e7;border-radius:12px;padding:13px;margin:9px 0;cursor:pointer}.format.selected{border-color:#0b5d3b;background:#f1f8f4}.formatline{display:flex;justify-content:space-between}.badge{background:#0b5d3b;color:#fff;border-radius:18px;padding:4px 8px;font-size:11px}.teams{display:grid;grid-template-columns:1fr 1fr;gap:10px}.team{background:#eef5f1;border-radius:10px;padding:10px}.team h3{margin:0 0 7px}.player{padding:3px 0}.match{border:1px solid #d9dfe3;border-radius:12px;padding:13px;margin:10px 0}.score{display:flex;gap:7px;margin-top:10px}.score button{flex:1}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:8px;border-bottom:1px solid #e1e5e8}.points{font-weight:800}.top{display:flex;justify-content:space-between;gap:10px;align-items:center}.courtgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.court{min-width:0}.courtTitle{font-weight:800;margin-bottom:5px}@media(max-width:600px){.names,.courtgrid,.teams{grid-template-columns:1fr}.row,.top{flex-direction:column;align-items:stretch}.score{flex-direction:column}}
+</style></head>
+<body><header><h1>⚽ Smålagsturnering</h1><div style="opacity:.85">Rettferdig rotasjon · 3v3 til 7v7</div></header><main>
+<section id="step1" class="card"><h2>1. Spillere på trening</h2><div class="small" style="margin-top:7px">Kryss av for de som er på trening. De faste spillerne er ferdig registrert. Fire åpne plasser kan brukes til nye spillere.</div><div id="names" class="names"></div><div id="attendance" class="notice"></div><button id="toFormat" class="primary">Neste: velg spillform →</button></section>
+<section id="step2" class="card hidden"><h2>2. Velg spillform</h2><div class="small">Velg 3v3–7v7. Deretter velger du én eller to baner.</div><div id="formatChoices"></div><div id="plan"></div><button id="start" class="primary">Start turneringen</button></section>
+<section id="tournament" class="hidden"><div class="card top"><div><h2 style="margin:0">🏆 Turnering</h2><div id="summary" class="small"></div></div><button id="newTournament" class="secondary">Ny turnering</button></div><div class="card"><h2>Poengtavle</h2><div id="table"></div></div><div class="card"><h2 id="roundTitle">Kamper</h2><div id="matches"></div></div></section>
+</main>
+<script>
+'use strict';
+const presetNames=['Lucas','Sigurd','Benjamin','Sander','Marius','Jan Henrik','William O','Johannes','Tom Einar','William P','Ian','Simen','Stian','Mikael','Matheo','Erik','Sverre','Loke','Jonas','Ørjan','Jens Åge','Thomas','Oskar'];
+let plan=null;let currentRound=0;let state={players:[],size:3,games:6,courts:1,rounds:[],matches:[],points:{},stats:{}};
+const $=id=>document.getElementById(id);
+function buildNames(){
+  const box=document.getElementById("names");
+  const previous=[...box.querySelectorAll(".playerrow")].map(row=>({
+    checked:row.querySelector("input[type=checkbox]").checked,
+    name:row.querySelector("input[type=text]").value
+  }));
+  box.innerHTML="";
+
+  const total=presetNames.length+4;
+  for(let i=0;i<total;i++){
+    const row=document.createElement("div");
+    row.className="playerrow";
+    const cb=document.createElement("input");
+    cb.type="checkbox";
+    cb.checked=i<presetNames.length;
+    const tx=document.createElement("input");
+    tx.type="text";
+    tx.placeholder=i<presetNames.length ? "Spiller "+(i+1) : "Ny spiller "+(i-presetNames.length+1);
+    tx.value=presetNames[i]||"";
+
+    if(previous[i]){
+      cb.checked=previous[i].checked;
+      tx.value=previous[i].name;
+    }
+    row.append(cb,tx);
+    box.appendChild(row);
+  }
+
+  updateAttendance();
+  box.querySelectorAll("input").forEach(el=>{
+    el.addEventListener("input",updateAttendance);
+    el.addEventListener("change",updateAttendance);
+  });
+}
+function selectedNames(){
+  return [...document.querySelectorAll('#names .playerrow')]
+    .filter(r=>r.querySelector('input[type="checkbox"]')?.checked)
+    .map(r=>r.querySelector('input[type="text"]')?.value.trim())
+    .filter(Boolean);
+}
+function updateAttendance(){
+  const n=selectedNames().length;
+  $('attendance').textContent=n+' spillere er valgt. '+(n>=6?'Klar til å gå videre.':'Minst 6 spillere kreves.');
+  $('attendance').className='notice '+(n>=6?'good':'warn');
+}
+function gcd(a,b){while(b){let t=a%b;a=b;b=t}return a}
+function gamePlan(n,size,courts=1){
+  // Antall kamper bestemmes kun av antall spillere og spillform.
+  // To baner brukes bare til å spille disse kampene parallelt – de skal
+  // ikke doble antall kamper eller kamper per spiller.
+  const k=2*size;
+  if(n<k)return null;
+  if(courts===2 && n<2*k)return null;
+  const step=k/gcd(n,k);
+  const games=Math.max(6,step*Math.ceil(6/step));
+  const matches=n*games/k;
+  if(!Number.isInteger(matches))throw new Error('Ugyldig kampmatematikk');
+  return {games,matches,rounds:Math.ceil(matches/courts),rest:n-k*courts};
+}
+function possibleFormats(n){return [3,4,5,6,7].filter(s=>2*s<=n)}
+function bestFormat(n){const fs=possibleFormats(n);return fs.reduce((best,s)=>{const a=gamePlan(n,s,1),b=gamePlan(n,best,1);if(!b)return s;if(a.games<b.games)return s;if(a.games===b.games&&Math.abs(a.rest-3)<Math.abs(b.rest-3))return s;return best},fs[0])}
+function showFormats(){const names=selectedNames();if(names.length<6){alert('Velg minst 6 spillere.');return}if(new Set(names.map(x=>x.toLowerCase())).size!==names.length){alert('To valgte spillere har samme navn.');return}const fs=possibleFormats(names.length);$('formatChoices').innerHTML=fs.map(s=>{const one=gamePlan(names.length,s,1);const two=gamePlan(names.length,s,2);const recommended=s===bestFormat(names.length);return `<div class="format ${recommended?'selected':''}" data-size="${s}"><div class="formatline"><b>${s}v${s}</b>${recommended?'<span class="badge">ANBEFALT</span>':''}</div><div class="small">1 bane: ${one.games} kamper/spiller · ${one.matches} kamper totalt</div><div class="small">${two?'2 baner: '+two.games+' kamper/spiller · '+two.rounds+' kampomganger':'2 baner: ikke mulig med dette antallet spillere'}</div></div>`}).join('');document.querySelectorAll('.format').forEach(el=>el.addEventListener('click',()=>chooseFormat(Number(el.dataset.size))));chooseFormat(bestFormat(names.length));$('step2').classList.remove('hidden');$('step2').scrollIntoView({behavior:'smooth'})}
+function chooseFormat(size){
+  const names=selectedNames();
+  const one=gamePlan(names.length,size,1);
+  const two=gamePlan(names.length,size,2);
+  if(!one){alert('Dette spillformatet kan ikke brukes med valgt antall spillere.');return}
+  plan={n:names.length,size,games:one.games,courts:1};
+  document.querySelectorAll('.format').forEach(el=>el.classList.toggle('selected',Number(el.dataset.size)===size));$('plan').innerHTML=`<div class="notice good"><b>Valgt ${size}v${size}</b><br>1 bane: ${one.games} kamper per spiller · ${one.matches} kamper totalt.</div><div class="card" style="margin-top:12px;background:#f8faf9;box-shadow:none;border:1px solid #dfe6e2"><h3 style="margin:0 0 8px">Baner</h3><label style="display:flex;align-items:center;gap:9px;font-weight:700"><input id="twoPitches" type="checkbox" ${two?'':'disabled'} style="width:20px;height:20px;accent-color:#0b5d3b"> Spill 2 kamper samtidig på 2 baner</label><div class="small" style="margin-top:6px">${two?'Mulig med '+names.length+' spillere.':'Ikke mulig med '+names.length+' spillere i '+size+'v'+size+' på to baner.'}</div></div>`
+  const pitchBox=document.getElementById("twoPitches");
+  if(pitchBox){
+    pitchBox.onchange=()=>{
+      const selectedTwo=pitchBox.checked;
+      const calc=gamePlan(names.length,size,selectedTwo?2:1);
+      if(selectedTwo && !calc){
+        pitchBox.checked=false;
+        plan.courts=1;
+        plan.games=one.games;
+        alert("To baner er ikke mulig med dette antallet spillere i valgt spillform.");
+        return;
+      }
+      plan.courts=selectedTwo?2:1;
+      plan.games=(selectedTwo?calc:one).games;
+    };
+  }
+}
+function shuffled(a){a=a.slice();for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a}
+function makeSchedule(players,size,games,twoPitches){
+  const n=players.length;
+  const totalSlots=n*games;
+  const slotsPerMatch=2*size;
+  if(totalSlots%slotsPerMatch!==0) throw new Error("Dette antallet spillere og denne spillformen gir ikke et helt antall kamper.");
+
+  const totalMatches=totalSlots/slotsPerMatch;
+  const matchesPerRound=twoPitches && totalMatches>=2 ? 2 : 1;
+  const roundCount=Math.ceil(totalMatches/matchesPerRound);
+  const remaining=Array(n).fill(games);
+  const rounds=[];
+  const teammate=Array.from({length:n},()=>Array(n).fill(0));
+  const opponent=Array.from({length:n},()=>Array(n).fill(0));
+
+  // Choose exactly the players needed for each round. No player can occur
+  // twice in a round, which makes two simultaneous pitches safe by construction.
+  for(let r=0;r<roundCount;r++){
+    const leftMatches=totalMatches-rounds.reduce((x,z)=>x+z.matches.length,0);
+    const k=(twoPitches && leftMatches>=2)?2:1;
+    const need=k*slotsPerMatch;
+
+    const eligible=[...Array(n).keys()].filter(i=>remaining[i]>0);
+    if(eligible.length<need) throw new Error("Ikke nok tilgjengelige spillerplasser til neste kampomgang.");
+
+    // Deterministic balanced selection: prioritize players with most remaining games,
+    // then rotate the tie-break so equal workloads stay evenly distributed.
+    eligible.sort((a,b)=>remaining[b]-remaining[a] || ((((a-r*need)%n)+n)%n)-((((b-r*need)%n)+n)%n));
+    // The sorted list itself is the exact selection. Because every round
+    // takes the players with the highest remaining count, the workload stays balanced.
+    const chosen=eligible.slice(0,need);
+
+    // Find a good split into teams without changing who plays.
+    let best=null,bestScore=Infinity;
+    for(let attempt=0;attempt<250;attempt++){
+      const sh=shuffled(chosen), ms=[], scoreRef={v:0};
+      for(let m=0;m<k;m++){
+        const A=sh.slice(m*2*size,m*2*size+size);
+        const B=sh.slice(m*2*size+size,m*2*size+2*size);
+        ms.push({a:A,b:B,result:null});
+        for(const team of [A,B])
+          for(let i=0;i<team.length;i++)for(let j=i+1;j<team.length;j++)
+            scoreRef.v+=teammate[team[i]][team[j]]*100;
+        for(const x of A)for(const y of B)scoreRef.v+=opponent[x][y]*2;
+      }
+      if(scoreRef.v<bestScore){bestScore=scoreRef.v;best=ms}
+      if(bestScore===0)break;
+    }
+
+    rounds.push({number:r+1,matches:best});
+    chosen.forEach(p=>remaining[p]--);
+
+    for(const m of best){
+      for(const team of [m.a,m.b])
+        for(let i=0;i<team.length;i++)for(let j=i+1;j<team.length;j++){
+          teammate[team[i]][team[j]]++;
+          teammate[team[j]][team[i]]++;
+        }
+      for(const x of m.a)for(const y of m.b){
+        opponent[x][y]++;opponent[y][x]++;
+      }
+    }
+  }
+
+  if(remaining.some(x=>x!==0)) throw new Error("Spillerne fikk ikke nøyaktig samme antall kamper.");
+  return rounds;
+}
+
+function validate(players,size,games,rounds,twoPitches){
+  const n=players.length, counts=Array(n).fill(0);
+
+  for(const round of rounds){
+    if(twoPitches && round.matches.length>2)return "For mange kamper i samme omgang.";
+    const used=new Set();
+
+    for(const m of round.matches){
+      if(m.a.length!==size||m.b.length!==size)return "Feil lagstørrelse.";
+      const all=m.a.concat(m.b);
+      if(new Set(all).size!==all.length)return "En spiller er registrert to ganger i samme kamp.";
+      for(const p of all){
+        if(used.has(p))return "En spiller er på begge banene samtidig.";
+        used.add(p);counts[p]++;
+      }
+    }
+  }
+
+  if(counts.some(x=>x!==games))return "Ikke alle spillere har fått nøyaktig samme antall kamper.";
+  const total=rounds.reduce((x,r)=>x+r.matches.length,0);
+  if(total!==n*games/(2*size))return "Feil antall kamper.";
+  if(twoPitches && total%2===0 && rounds.some(r=>r.matches.length!==2))
+    return "Et partall kamper skal fordeles på to baner.";
+  return null;
+}
+
+function startTournament(){
+  const names=selectedNames();
+  if(!plan||names.length!==plan.n){alert("Gå tilbake og velg spillform på nytt.");return}
+  if(names.length<2*plan.size){alert(`Det er ikke nok spillere til ${plan.size}v${plan.size}.`);return}
+
+  const two=document.getElementById("twoPitches")?.checked||false;
+  const selectedPlan=gamePlan(names.length,plan.size,two?2:1);
+  if(!selectedPlan){
+    alert("Det valgte antallet spillere kan ikke bruke denne spillformen på valgt antall baner.");
+    return;
+  }
+  plan.games=selectedPlan.games;
+  plan.courts=two?2:1;
+  let rounds;
+  try{rounds=makeSchedule(names,plan.size,plan.games,two)}
+  catch(e){alert("Kampoppsettet kunne ikke lages:\n\n"+e.message);return}
+
+  const err=validate(names,plan.size,plan.games,rounds,two);
+  if(err){alert("Kampoppsettet ble avvist:\n\n"+err);return}
+
+  const matches=rounds.flatMap(r=>r.matches);
+  state={players:names,size:plan.size,games:plan.games,courts:two?2:1,matches,rounds,twoPitches:two,points:{},stats:{}};
+  names.forEach((_,i)=>{state.points[i]=0;state.stats[i]={w:0,d:0,l:0,g:0}});
+  currentRound=0;
+  document.getElementById("step1").classList.add("hidden");
+  document.getElementById("step2").classList.add("hidden");
+  document.getElementById("tournament").classList.remove("hidden");
+  document.getElementById("summary").textContent=`${names.length} spillere · ${plan.size}v${plan.size} · ${matches.length} kamper · ${selectedPlan.games} kamper per spiller${two?" · 2 baner":""}`;
+  renderAll();
+}
+
+function recordResult(i,r){const m=state.matches[i];if(m.result)return;m.result=r;const add=(arr,k)=>arr.forEach(p=>{state.stats[p].g++;state.stats[p][k]++;if(k==='w')state.points[p]+=3;if(k==='d')state.points[p]+=1});if(r==='a'){add(m.a,'w');add(m.b,'l')}else if(r==='b'){add(m.a,'l');add(m.b,'w')}else{add(m.a,'d');add(m.b,'d')}renderAll()}
+function undoResult(i){const m=state.matches[i];if(!m.result)return;const sub=(arr,k)=>arr.forEach(p=>{state.stats[p].g--;state.stats[p][k]--;if(k==='w')state.points[p]-=3;if(k==='d')state.points[p]-=1});if(m.result==='a'){sub(m.a,'w');sub(m.b,'l')}else if(m.result==='b'){sub(m.a,'l');sub(m.b,'w')}else{sub(m.a,'d');sub(m.b,'d')}m.result=null;renderAll()}
+function esc(s){return s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function renderAll(){const arr=state.players.map((p,i)=>({p,i,...state.stats[i],pts:state.points[i]})).sort((a,b)=>b.pts-a.pts||b.w-a.w||a.p.localeCompare(b.p));$('table').innerHTML='<table><tr><th>#</th><th>Spiller</th><th>Kamper</th><th>V</th><th>U</th><th>T</th><th>Poeng</th></tr>'+arr.map((x,k)=>`<tr><td>${k+1}</td><td>${esc(x.p)}</td><td>${x.g}</td><td>${x.w}</td><td>${x.d}</td><td>${x.l}</td><td class="points">${x.pts}</td></tr>`).join('')+'</table>';renderRound()}
+function renderRound(){const box=$('matches');const round=state.rounds[currentRound];let html=`<div class="notice good"><b>Kampomgang ${round.number} av ${state.rounds.length}</b>${state.courts===2?' · 2 baner':''}<br>${round.matches.length===2?'Begge kampene må registreres før Neste kamp.':'Registrer resultatet før Neste kamp.'}</div>`;if(round.matches.length===2)html+='<div class="courtgrid">';round.matches.forEach((m,j)=>{const idx=state.matches.indexOf(m);const team=a=>a.map(p=>`<div class="player">${esc(state.players[p])}</div>`).join('');html+=`<div class="match court"><div class="courtTitle">${state.courts===2?'Bane '+(j+1)+' · ':''}Kamp ${idx+1}</div><div class="teams"><div class="team"><h3>🔵 Lag 1</h3>${team(m.a)}</div><div class="team"><h3>🔴 Lag 2</h3>${team(m.b)}</div></div><div class="score">${m.result?`<div class="notice good" style="width:100%;margin:0">${m.result==='a'?'🔵 Lag 1 vant':m.result==='b'?'🔴 Lag 2 vant':'Uavgjort'}</div>`:`<button class="resultBtn" data-i="${idx}" data-r="a">🔵 Lag 1 vant</button><button class="resultBtn" data-i="${idx}" data-r="d">Uavgjort</button><button class="resultBtn" data-i="${idx}" data-r="b">🔴 Lag 2 vant</button>`}</div></div>`});if(round.matches.length===2)html+='</div>';const complete=round.matches.every(m=>m.result);const last=currentRound===state.rounds.length-1;html+=`<button id="next" class="primary" ${complete?'':'disabled'}>${last?'🏆 Vis sluttresultat':'Neste kamp →'}</button>`;box.innerHTML=html;box.querySelectorAll('.resultBtn').forEach(b=>b.addEventListener('click',()=>recordResult(Number(b.dataset.i),b.dataset.r)));$('next').addEventListener('click',()=>{if(!complete)return;if(last){alert('Turneringen er ferdig!')}else{currentRound++;renderRound();window.scrollTo({top:box.offsetTop-10,behavior:'smooth'})}})}
+$('toFormat').addEventListener('click',showFormats);$('start').addEventListener('click',startTournament);$('newTournament').addEventListener('click',()=>location.reload());buildNames();
+</script></body></html>
